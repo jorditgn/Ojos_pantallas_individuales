@@ -11,6 +11,7 @@
  */
 #include "drawing_tools.h"
 #include <Arduino.h>
+#include <math.h> // for sqrtf(), used to precompute the curved eyelid shape
 
 // TFT library
 #include <TFT_eSPI.h> 
@@ -34,6 +35,30 @@ TFT_eSprite spr = TFT_eSprite(&tft);
 
 // --- Optimisation: Scanline definition ---
 Scanline circular_scanlines[SCR_HT];
+
+// --- Eyelid arc shape ---
+// Precomputed per-column offset that makes the eyelid boundary follow a
+// curved arc (like a real eyelid) instead of a flat horizontal line.
+// Index = column within the eye texture (0..EYE_IMAGE_WIDTH-1).
+// Value = how many extra pixels stay OPEN at that column, tallest at the
+// horizontal center and fading to 0 at the left/right edges.
+static int16_t eyelid_arc_offset[EYE_IMAGE_WIDTH];
+
+/**
+ * @brief Precomputes the curved eyelid boundary shape (semicircular arc,
+ * tallest at the horizontal center). Called once at startup; the shape
+ * itself never changes, only how much of it is "used" as the eye blinks.
+ */
+void init_eyelid_arc() {
+  const float half_w = EYE_IMAGE_WIDTH / 2.0f;
+  for (int16_t x = 0; x < EYE_IMAGE_WIDTH; x++) {
+    float nx = (x - half_w) / half_w; // -1.0 .. 1.0
+    float clamped = 1.0f - nx * nx;
+    if (clamped < 0.0f) clamped = 0.0f;
+    float factor = sqrtf(clamped); // 1.0 at center, 0.0 at edges
+    eyelid_arc_offset[x] = (int16_t)(EYELID_ARC_AMPLITUDE_PX * factor);
+  }
+}
 
 // --- Forward Declarations for internal functions ---
 void pushSpriteToFb(TFT_eSprite* sprite, int32_t x, int32_t y, uint16_t* framebuffer, uint16_t transparent_color);
@@ -289,6 +314,7 @@ void init_tft() {
   digitalWrite(screens[EYE_RIGHT].CS, HIGH);
 
   precalculate_scanlines(); // Fill our circular screen map
+  init_eyelid_arc();        // Precompute the curved eyelid boundary shape
 
   // Load eye image from LittleFS
   load_specific_eye_image(EYE_IMAGE_NORMAL_PATH, EYE_IMAGE_WIDTH, EYE_IMAGE_HEIGHT, &eye_texture.buffers[EYE_IMAGE_NORMAL]);
@@ -319,8 +345,16 @@ void draw_eye_image(int16_t x_pos, int16_t y_pos, uint8_t eyelid_level, EyeImage
   const int16_t scaled_width = EYE_IMAGE_WIDTH;
   const int16_t scaled_height = EYE_IMAGE_HEIGHT;
 
-  // Eyelid cutoff calculation
-  int16_t eyelid_y_cutoff = (eyelid_level / 128.0f) * (scaled_height / 2.0f);
+  // Base eyelid closure amount, as a 0.0 (open) .. 1.0 (fully closed) fraction.
+  const float blink_progress = eyelid_level / (float)BLINK_LEVEL_MAX;
+  const float base_cutoff_f = blink_progress * (scaled_height / 2.0f);
+  // The curved-arc effect must fade out completely as the eye approaches full
+  // closure, otherwise the center columns (which have the largest arc offset)
+  // would never fully close - a permanent gap would remain at the middle
+  // even at eyelid_level == BLINK_LEVEL_MAX. Tapering by (1 - blink_progress)
+  // guarantees col_cutoff reaches scaled_height/2 everywhere at full closure.
+  const float arc_taper = 1.0f - blink_progress;
+  const bool eye_fully_open = (eyelid_level == 0);
 
   // --- Fixed-point integer optimization ---
   uint32_t src_y_accum = 0;
@@ -329,8 +363,10 @@ void draw_eye_image(int16_t x_pos, int16_t y_pos, uint8_t eyelid_level, EyeImage
   for (int16_t y = 0; y < scaled_height; y++) {
     int16_t dest_y = y_pos + y;
 
-    // Skip lines that are off-screen or closed by the eyelid
-    if (dest_y < 0 || dest_y >= SCR_HT || y < eyelid_y_cutoff || y >= (scaled_height - eyelid_y_cutoff)) {
+    // Skip lines that are simply off-screen (blink masking is now handled
+    // per-column below, since the eyelid boundary is a curved arc, not a
+    // flat line, so a whole row can no longer be trivially skipped).
+    if (dest_y < 0 || dest_y >= SCR_HT) {
       src_y_accum += src_increment;
       continue;
     }
@@ -359,6 +395,23 @@ void draw_eye_image(int16_t x_pos, int16_t y_pos, uint8_t eyelid_level, EyeImage
     // Do not draw parts of the eye closed by the eyelid
     for (int16_t dest_x = x_start_draw; dest_x < x_end_draw; dest_x++) {
         int16_t src_x = src_x_accum >> 16;
+
+        if (!eye_fully_open) {
+            // Curved eyelid boundary: the column near the horizontal center
+            // stays open longer (like a real almond-shaped eyelid) than the
+            // columns near the left/right edges - but that curve effect
+            // fades out as the blink approaches full closure, so the eye
+            // still ends up completely closed everywhere.
+            int16_t arc = (src_x >= 0 && src_x < EYE_IMAGE_WIDTH) ? eyelid_arc_offset[src_x] : 0;
+            float col_cutoff_f = base_cutoff_f - (arc * arc_taper);
+            if (col_cutoff_f < 0.0f) col_cutoff_f = 0.0f;
+            int16_t col_cutoff = (int16_t)col_cutoff_f;
+
+            if (y < col_cutoff || y >= (scaled_height - col_cutoff)) {
+                src_x_accum += src_increment;
+                continue; // covered by the (curved) eyelid at this column
+            }
+        }
 
         uint16_t source_color = source_line[src_x]; // Read from the pre-calculated line
         if (source_color == TRANSPARENT_COLOR_KEY) {

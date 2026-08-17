@@ -33,4 +33,11 @@ EyePosition get_eye_position(int eye_index);
 // Determines which eye image to use based on the target's validity
 EyeImageType get_current_eye_image_type(const TofTarget& target);
 
+// Updates the internal blink state machine. Call once per frame, before drawing.
+void update_blink();
+
+// Gets the current eyelid closure level (0 = fully open, BLINK_LEVEL_MAX = fully closed).
+// Same value is shared by both eyes so they blink in sync.
+uint8_t get_blink_level();
+
 #endif // EYE_LOGIC_H

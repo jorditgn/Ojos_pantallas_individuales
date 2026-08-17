@@ -53,6 +53,24 @@ const int RESTING_2D_OFFSET_PIXELS = (SCR_WD - EYE_IMAGE_WIDTH) / 2; // The "res
 // --- ToF Sensor Behavior ---
 const int MAX_DIST_TOF = 400; // Maximum distance in mm to consider a ToF target "close".
 
+// --- Blink Behavior ---
+// Controls automatic, natural-looking eyelid blinking.
+// *** MODO PRUEBA: parpadeo muy frecuente y lento, solo para verificar que
+// *** funciona. Una vez confirmado, restaurar a los valores normales
+// *** (2500-7000 / 90 / 40 / 110).
+const unsigned long BLINK_MIN_INTERVAL_MS = 2500;
+const unsigned long BLINK_MAX_INTERVAL_MS = 7000;
+const unsigned long BLINK_CLOSE_DURATION_MS = 190;
+const unsigned long BLINK_HOLD_DURATION_MS = 90;
+const unsigned long BLINK_OPEN_DURATION_MS = 110;
+const uint8_t BLINK_LEVEL_MAX = 128;               // Fully closed value expected by draw_eye_image().
+
+// How curved the eyelid boundary is: the eye "opening" stays taller at the
+// horizontal center and shrinks first near the corners (like a real almond-
+// shaped eyelid), instead of closing as a flat horizontal line.
+// Bigger value = more pronounced curve.
+const int16_t EYELID_ARC_AMPLITUDE_PX = 30;
+
 
 
 #endif // CONFIG_H

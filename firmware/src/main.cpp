@@ -152,6 +152,10 @@ void main_loop() {
   // Update the logical positions of the eyes based on the target
   update_eye_positions(target);
 
+  // Update the blink state machine (shared by both eyes, so they blink in sync)
+  update_blink();
+  uint8_t blink_level = get_blink_level();
+
   // --- 3. Drawing ---
   for (int i = 0; i < NUM_EYES; i++) {
     select_screen(i);
@@ -161,8 +165,8 @@ void main_loop() {
     EyePosition pos = get_eye_position(i);
     EyeImageType image_type = get_current_eye_image_type(target);
 
-    // Draw the eye at its final calculated position
-    draw_eye_at_target(pos.x, pos.y, 0, image_type); // 0 = eyelid open
+    // Draw the eye at its final calculated position (eyelid level animated by update_blink())
+    draw_eye_at_target(pos.x, pos.y, blink_level, image_type);
 
     // Optional: Draw the ToF debug grid on one of the screens
     #if USE_TOF_SENSOR && SHOW_TOF_DEBUG_GRID

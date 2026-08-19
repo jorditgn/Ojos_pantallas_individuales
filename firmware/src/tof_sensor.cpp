@@ -19,27 +19,94 @@
 static SparkFun_VL53L5CX myImager;
 static VL53L5CX_ResultsData measurementData; // Raw measurement data from the sensor
 static TofTarget current_target = {0, 0, 0, false, -1, -1, 0}; // The currently tracked target, initialized
+static bool tof_available = false; // Becomes true only if init actually succeeds
+
+/**
+ * @brief Prints a human-readable reason when the VL53L5CX library reports
+ * an internal error - this tells us exactly WHERE begin() failed, instead
+ * of just "no response".
+ */
+static void tof_error_callback(SF_VL53L5CX_ERROR_TYPE errorCode, uint32_t errorValue) {
+  Serial.print("    [ToF error] ");
+  switch (errorCode) {
+    case SF_VL53L5CX_ERROR_TYPE::I2C_INITIALIZATION_ERROR:
+      Serial.println("I2C_INITIALIZATION_ERROR - the library's low-level I2C wrapper failed to start.");
+      break;
+    case SF_VL53L5CX_ERROR_TYPE::I2C_NOT_RESPONDING:
+      Serial.println("I2C_NOT_RESPONDING - sensor did not ACK during a later transaction.");
+      break;
+    case SF_VL53L5CX_ERROR_TYPE::INVALID_DEVICE:
+      Serial.println("INVALID_DEVICE - device ID / revision ID registers did not match a VL53L5CX.");
+      Serial.println("                 (wrong sensor variant, or corrupted read during that transaction)");
+      break;
+    case SF_VL53L5CX_ERROR_TYPE::DEVICE_INITIALIZATION_ERROR:
+      Serial.printf("DEVICE_INITIALIZATION_ERROR - vl53l5cx_init() failed, internal code: %u\n", errorValue);
+      Serial.println("                 (this is the firmware-upload step)");
+      break;
+    default:
+      Serial.printf("Unknown error code %d, value %u\n", (int)errorCode, errorValue);
+      break;
+  }
+}
 
 /**
  * @brief Initializes the VL53L5CX ToF sensor.
+ *
+ * IMPORTANT: this must never permanently hang or infinite-loop-reboot the
+ * board if the sensor is missing/miswired/unpowered - the eyes must still
+ * work without it. We bound the I2C bus timeout and the number of retries,
+ * then simply disable tracking (tof_available = false) if it never succeeds.
  */
 void init_tof_sensor() {
   Serial.println("Initializing VL53L5CX ToF Sensor...");
   Wire.begin(PIN_TOF_SDA, PIN_TOF_SCL);
-  // Increase I2C bus speed for faster data transfer.
-  // We are switching to 1MHz (1000000Hz) for maximum performance.
-  Wire.setClock(1000000); 
+  // NOTE: 1MHz was too aggressive for breadboard/jumper-wire wiring (long,
+  // unshielded leads) and could cause total I2C communication failure.
+  // 400kHz (I2C Fast Mode) is standard and much more tolerant of imperfect
+  // wiring - try this first before suspecting the sensor itself.
+  Wire.setClock(400000);
 
-  if (myImager.begin() == false) {
-    Serial.println("ERROR: VL53L5CX Sensor not found. Rebooting in 3 seconds...");
-    delay(3000);
-    ESP.restart();
+  // Prevents the I2C driver itself from hanging forever on a stuck/floating
+  // bus (e.g. sensor half-connected or unpowered). Generous value because
+  // the VL53L5CX uploads an internal firmware blob during begin() - a
+  // legitimate transaction can take a while; a too-tight timeout here can
+  // abort that upload mid-way and make an otherwise-working sensor "fail".
+  Wire.setTimeOut(1000);
+
+  const int MAX_ATTEMPTS = 3;
+
+  myImager.setErrorCallback(tof_error_callback);
+
+  bool ok = false;
+  for (int attempt = 1; attempt <= MAX_ATTEMPTS && !ok; attempt++) {
+    Serial.printf("  ToF init attempt %d/%d...\n", attempt, MAX_ATTEMPTS);
+    Serial.flush();
+
+    // One clean, uninterrupted call - re-calling begin() rapidly while a
+    // previous attempt's firmware upload may still be settling can leave
+    // the sensor in a bad intermediate state, making things worse.
+    ok = myImager.begin();
+
+    if (!ok) {
+      Serial.println("    (no response, will retry)");
+      delay(500); // give the sensor time to settle before trying again
+    }
+  }
+
+  if (!ok) {
+    Serial.println("WARNING: VL53L5CX not found after several attempts.");
+    Serial.println("         Continuing WITHOUT the ToF sensor (eyes will");
+    Serial.println("         move autonomously, no tracking).");
+    Serial.flush();
+    tof_available = false;
+    return; // <-- key: we return normally, setup()/loop() continue as usual
   }
 
   myImager.setResolution(8 * 8); // 64 zones de mesure
   myImager.setRangingFrequency(15); // 15 Hz
   myImager.startRanging();
 
+  tof_available = true;
   Serial.println("VL53L5CX Sensor Initialized.");
 }
 
@@ -226,6 +293,9 @@ void update_tof_sensor_data() {
     process_measurement_data(micros());
 
 #else
+  if (!tof_available) {
+    return; // sensor failed to initialize - skip silently, target stays invalid
+  }
   // Run detection logic only when new data is available
   if (myImager.isDataReady()) {
     unsigned long profile_start_time = micros();

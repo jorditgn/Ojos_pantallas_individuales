@@ -17,9 +17,9 @@
 #define PIN_CS2 TFT_CS_R // Chip-select for screen 2
 
 // --- ToF Sensor (VL53L5CX) Configuration ---
-#define USE_TOF_SENSOR 0 // Set to 1 to enable the ToF sensor, 0 to disable it.
+#define USE_TOF_SENSOR 1 // Set to 1 to enable the ToF sensor, 0 to disable it.
 #define TOF_CALIBRATION_MODE 0 // Set to 1 to simulate sensor data for debugging.
-#define SHOW_TOF_DEBUG_GRID 1 // Set to 1 to display the debug grid, 0 to hide it
+#define SHOW_TOF_DEBUG_GRID 0 // Set to 1 to display the debug grid, 0 to hide it
 
 #define PIN_TOF_SCL 8
 #define PIN_TOF_SDA 18

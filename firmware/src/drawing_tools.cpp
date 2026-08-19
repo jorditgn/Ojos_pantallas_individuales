@@ -42,17 +42,24 @@ Scanline circular_scanlines[SCR_HT];
 // Index = column within the eye texture (0..EYE_IMAGE_WIDTH-1).
 // Value = how many extra pixels stay OPEN at that column, tallest at the
 // horizontal center and fading to 0 at the left/right edges.
-static int16_t eyelid_arc_offset[EYE_IMAGE_WIDTH];
+// Indexado por columna de PANTALLA (no de textura): el parpado esta anclado
+// a la cara/pantalla, no al globo ocular. Si se indexara por columna de
+// textura, la cupula del arco se desplazaria lateralmente cada vez que el
+// ojo mira a un lado (x_pos cambia con las sacadicas), y al coincidir ese
+// desplazamiento lateral con el cierre vertical del parpadeo, el borde se ve
+// avanzar en diagonal en vez de en vertical.
+static int16_t eyelid_arc_offset[SCR_WD];
 
 /**
  * @brief Precomputes the curved eyelid boundary shape (semicircular arc,
- * tallest at the horizontal center). Called once at startup; the shape
- * itself never changes, only how much of it is "used" as the eye blinks.
+ * tallest at the horizontal center of the SCREEN). Called once at startup;
+ * the shape itself never changes, only how much of it is "used" as the eye
+ * blinks. Fixed to screen space so it doesn't move when the eye looks around.
  */
 void init_eyelid_arc() {
-  const float center = EYE_IMAGE_WIDTH / 2.0f;      // centro de la textura
+  const float center = SCR_WD / 2.0f;               // centro de la pantalla
   const float half_w = EYELID_ARC_WIDTH_PX / 2.0f;  // semiancho de la cupula
-  for (int16_t x = 0; x < EYE_IMAGE_WIDTH; x++) {
+  for (int16_t x = 0; x < SCR_WD; x++) {
     float nx = (x - center) / half_w; // -1.0 .. 1.0 dentro de la cupula
     if (nx < -1.0f) nx = -1.0f;       // fuera de la cupula: arco plano (0)
     if (nx > 1.0f) nx = 1.0f;
@@ -331,6 +338,22 @@ void init_tft() {
 // --- Core Drawing & Rendering ---
 
 /**
+ * @brief Linearly blends an RGB565 color towards black.
+ * Used to feather the edge of the pupil dilation overlay. Operates on raw
+ * (pre-swap) RGB565 values, same convention as the rest of this file.
+ * @param color The source color, in raw (pre-swap) RGB565.
+ * @param mix 0.0 = fully black, 1.0 = fully the source color.
+ */
+static inline uint16_t blend_rgb565_with_black(uint16_t color, float mix) {
+    if (mix <= 0.0f) return 0x0000;
+    if (mix >= 1.0f) return color;
+    uint8_t r = (uint8_t)(((color >> 11) & 0x1F) * mix);
+    uint8_t g = (uint8_t)(((color >> 5) & 0x3F) * mix);
+    uint8_t b = (uint8_t)((color & 0x1F) * mix);
+    return (r << 11) | (g << 5) | b;
+}
+
+/**
  * @brief Draws the circular eye image with eyelid occlusion.
  * This is the main rendering function for the eye itself, using multiple
  * optimizations like pre-calculated scanlines and fixed-point math.
@@ -338,8 +361,9 @@ void init_tft() {
  * @param y_pos The y-coordinate of the top-left of the image.
  * @param eyelid_level The current level of the eyelid (0=open).
  * @param image_type The type of eye image to draw (normal or bad).
+ * @param pupil_dilation Pupil dilation, 0.0 (baked size) .. 1.0 (fully dilated).
  */
-void draw_eye_image(int16_t x_pos, int16_t y_pos, uint8_t eyelid_level, EyeImageType image_type) {
+void draw_eye_image(int16_t x_pos, int16_t y_pos, uint8_t eyelid_level, EyeImageType image_type, float pupil_dilation) {
   // If the image buffer has not been loaded, do nothing.
   if (!eye_texture.buffers[image_type]) {
     return;
@@ -370,10 +394,35 @@ void draw_eye_image(int16_t x_pos, int16_t y_pos, uint8_t eyelid_level, EyeImage
   // esa rendija no llega a dibujarse nunca. El framebuffer ya viene limpio a
   // negro desde clear_buffer(), asi que salir aqui deja la pantalla cerrada
   // (y de paso ahorra el bucle de dibujado mientras el ojo esta cerrado).
-  // Se comprueba sobre la columna central (base - amplitud del arco), que es la
-  // ultima en cerrarse; si esa ya esta tapada, el resto tambien lo esta.
-  if (base_cutoff_f - EYELID_ARC_AMPLITUDE_PX >= (scaled_height / 2.0f) - EYELID_SNAP_CLOSED_PX) {
+  // Se comprueba sobre la columna central, que es la ultima en cerrarse; si
+  // la suma de lo que recorren ambos parpados ahi (base_cutoff_f repartido
+  // por EYELID_UPPER_RATIO, menos el arco de cada uno) ya cubre el alto
+  // completo, el resto de columnas tambien esta tapada.
+  const float center_arc_sum = EYELID_ARC_AMPLITUDE_PX * (1.0f + EYELID_LOWER_ARC_FACTOR);
+  if (2.0f * base_cutoff_f - center_arc_sum >= scaled_height - EYELID_SNAP_CLOSED_PX) {
     return;
+  }
+
+  // --- Pupil dilation overlay setup (once per call, not per pixel) ---
+  // Centered in TEXTURE space, so it stays put regardless of x_pos/y_pos
+  // (the texture is only translated on screen, never scaled/rotated).
+  // The radius grows from PUPIL_BASE_RADIUS_PX (the pupil already baked into
+  // the texture) up to PUPIL_MAX_RADIUS_PX, so every dilation value above 0
+  // produces a visible change. Mapping from 0 instead would hide the whole
+  // lower half of the range behind the baked pupil.
+  const bool apply_dilation = pupil_dilation > 0.0f;
+  int16_t dilation_radius = 0;
+  int32_t dilation_radius_sq = 0, dilation_inner_radius_sq = 0;
+  if (apply_dilation) {
+    dilation_radius = PUPIL_BASE_RADIUS_PX +
+                      (int16_t)(pupil_dilation * (PUPIL_MAX_RADIUS_PX - PUPIL_BASE_RADIUS_PX));
+    // The feather band sits just INSIDE the edge, [radius - feather, radius].
+    // Putting it outside would darken a ring of iris even at dilation 0, where
+    // the overlay is meant to be indistinguishable from the bare texture.
+    int16_t inner = dilation_radius - PUPIL_FEATHER_PX;
+    if (inner < 0) inner = 0;
+    dilation_radius_sq = (int32_t)dilation_radius * dilation_radius;
+    dilation_inner_radius_sq = (int32_t)inner * inner;
   }
 
   // --- Fixed-point integer optimization ---
@@ -408,6 +457,17 @@ void draw_eye_image(int16_t x_pos, int16_t y_pos, uint8_t eyelid_level, EyeImage
     int16_t src_y = src_y_accum >> 16;
     uint16_t* source_line = &eye_texture.buffers[image_type][src_y * EYE_IMAGE_WIDTH]; // Calculate source line address once
     uint16_t* framebuffer_line = &framebuffers[active_screen_index][(dest_y * SCR_WD)];
+
+    // Precompute the vertical term of the pupil-dilation distance once per
+    // row (mirrors the eyelid_arc_offset pattern: cheap per-row work instead
+    // of repeating it for every column).
+    int32_t dilation_dy_sq = 0;
+    bool row_may_touch_pupil = false;
+    if (apply_dilation) {
+        int32_t dy = (int32_t)src_y - PUPIL_CENTER_Y;
+        dilation_dy_sq = dy * dy;
+        row_may_touch_pupil = (dilation_dy_sq <= dilation_radius_sq);
+    }
     
     // Initialize the X accumulator for the first visible coordinate
     uint32_t src_x_accum = (x_start_draw - x_pos) * src_increment;
@@ -422,14 +482,53 @@ void draw_eye_image(int16_t x_pos, int16_t y_pos, uint8_t eyelid_level, EyeImage
             // amplitud del arco ya NO se atenua con el avance del parpadeo: el
             // "overshoot" de base_cutoff_f garantiza el cierre completo, asi
             // que la curva se mantiene igual de marcada de principio a fin.
-            int16_t arc = (src_x >= 0 && src_x < EYE_IMAGE_WIDTH) ? eyelid_arc_offset[src_x] : 0;
-            float col_cutoff_f = base_cutoff_f - arc;
-            if (col_cutoff_f < 0.0f) col_cutoff_f = 0.0f;
-            int16_t col_cutoff = (int16_t)col_cutoff_f;
+            // Reparto asimetrico: el parpado superior recorre EYELID_UPPER_RATIO
+            // de la distancia total de cierre, el inferior el resto, y la curva
+            // del inferior se atenua con EYELID_LOWER_ARC_FACTOR (ver config.h).
+            // Al conservar la misma base_cutoff_f, la suma de ambos recorridos
+            // sigue alcanzando el cierre completo en BLINK_LEVEL_MAX; solo se
+            // desplaza el punto de encuentro hacia abajo, como en un ojo real.
+            // Se indexa por dest_x (columna de pantalla), no por src_x
+            // (columna de textura), para que la cupula quede fija respecto
+            // a la pantalla y no se desplace lateralmente con la mirada.
+            int16_t arc = (dest_x >= 0 && dest_x < SCR_WD) ? eyelid_arc_offset[dest_x] : 0;
+            float top_cutoff_f = 2.0f * EYELID_UPPER_RATIO * base_cutoff_f - arc;
+            float bottom_cutoff_f = 2.0f * (1.0f - EYELID_UPPER_RATIO) * base_cutoff_f - (arc * EYELID_LOWER_ARC_FACTOR);
+            if (top_cutoff_f < 0.0f) top_cutoff_f = 0.0f;
+            if (bottom_cutoff_f < 0.0f) bottom_cutoff_f = 0.0f;
+            int16_t top_cutoff = (int16_t)top_cutoff_f;
+            int16_t bottom_cutoff = (int16_t)bottom_cutoff_f;
 
-            if (y < col_cutoff || y >= (scaled_height - col_cutoff)) {
+            if (y < top_cutoff || y >= (scaled_height - bottom_cutoff)) {
                 src_x_accum += src_increment;
                 continue; // covered by the (curved) eyelid at this column
+            }
+        }
+
+        // --- Pupil dilation overlay ---
+        // A black circle, centered in texture space, grown on top of the
+        // baked pupil/iris. Cheap outside the pupil's bounding box (a single
+        // false branch); real cost (sqrt + blend) only happens for the thin
+        // feather ring of pixels at the circle's edge.
+        if (row_may_touch_pupil) {
+            int32_t dx = (int32_t)src_x - PUPIL_CENTER_X;
+            int32_t dist_sq = dx * dx + dilation_dy_sq;
+            if (dist_sq <= dilation_radius_sq) {
+                if (dist_sq <= dilation_inner_radius_sq) {
+                    // Fully inside the dilated pupil: opaque black.
+                    framebuffer_line[dest_x] = 0x0000;
+                } else {
+                    // Feather ring: blend from black (inner edge) to the
+                    // source texture color (outer edge). Blending the
+                    // transparent color key (0x0000) towards black is still
+                    // 0x0000, so no special-casing is needed there.
+                    float dist = sqrtf((float)dist_sq);
+                    float mix = (dist - (dilation_radius - PUPIL_FEATHER_PX)) / (float)PUPIL_FEATHER_PX;
+                    uint16_t blended = blend_rgb565_with_black(source_line[src_x], mix);
+                    framebuffer_line[dest_x] = swap_color_bytes(blended);
+                }
+                src_x_accum += src_increment;
+                continue;
             }
         }
 
@@ -454,12 +553,13 @@ void draw_eye_image(int16_t x_pos, int16_t y_pos, uint8_t eyelid_level, EyeImage
  * @param target_y The vertical target, from -1.0 (up) to 1.0 (down).
  * @param eyelid_level The current level of the eyelid (0=open).
  * @param image_type The type of eye image to draw (normal or bad).
+ * @param pupil_dilation Pupil dilation, 0.0 (baked size) .. 1.0 (fully dilated).
  */
-void draw_eye_at_target(float target_x, float target_y, uint8_t eyelid_level, EyeImageType image_type) {
+void draw_eye_at_target(float target_x, float target_y, uint8_t eyelid_level, EyeImageType image_type, float pupil_dilation) {
     // Calculate the final pixel offset based on the normalized target coordinates
     int16_t x_offset = target_x * MAX_2D_OFFSET_PIXELS;
     int16_t y_offset = target_y * MAX_2D_OFFSET_PIXELS;
-    draw_eye_image(RESTING_2D_OFFSET_PIXELS + x_offset, RESTING_2D_OFFSET_PIXELS + y_offset, eyelid_level, image_type);
+    draw_eye_image(RESTING_2D_OFFSET_PIXELS + x_offset, RESTING_2D_OFFSET_PIXELS + y_offset, eyelid_level, image_type, pupil_dilation);
 }
 
 /**

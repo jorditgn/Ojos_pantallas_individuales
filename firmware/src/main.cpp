@@ -156,6 +156,10 @@ void main_loop() {
   update_blink();
   uint8_t blink_level = get_blink_level();
 
+  // Update the pupil dilation state (shared by both eyes)
+  update_pupil_dilation(target);
+  float pupil_dilation = get_pupil_dilation();
+
   // --- 3. Drawing ---
   for (int i = 0; i < NUM_EYES; i++) {
     select_screen(i);
@@ -165,8 +169,9 @@ void main_loop() {
     EyePosition pos = get_eye_position(i);
     EyeImageType image_type = get_current_eye_image_type(target);
 
-    // Draw the eye at its final calculated position (eyelid level animated by update_blink())
-    draw_eye_at_target(pos.x, pos.y, blink_level, image_type);
+    // Draw the eye at its final calculated position (eyelid level animated by update_blink(),
+    // pupil dilation animated by update_pupil_dilation())
+    draw_eye_at_target(pos.x, pos.y, blink_level, image_type, pupil_dilation);
 
     // Optional: Draw the ToF debug grid on one of the screens
     #if USE_TOF_SENSOR && SHOW_TOF_DEBUG_GRID

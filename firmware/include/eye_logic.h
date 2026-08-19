@@ -40,4 +40,13 @@ void update_blink();
 // Same value is shared by both eyes so they blink in sync.
 uint8_t get_blink_level();
 
+// Updates the pupil dilation state. Call once per frame, before drawing.
+// Runs on its own internal timers and does NOT depend on eye position, so the
+// call order relative to update_eye_positions() does not matter.
+void update_pupil_dilation(const TofTarget& target);
+
+// Gets the current pupil dilation (0.0 = contracted/baked size, 1.0 = fully dilated).
+// Same value is shared by both eyes.
+float get_pupil_dilation();
+
 #endif // EYE_LOGIC_H

@@ -50,9 +50,12 @@ static int16_t eyelid_arc_offset[EYE_IMAGE_WIDTH];
  * itself never changes, only how much of it is "used" as the eye blinks.
  */
 void init_eyelid_arc() {
-  const float half_w = EYE_IMAGE_WIDTH / 2.0f;
+  const float center = EYE_IMAGE_WIDTH / 2.0f;      // centro de la textura
+  const float half_w = EYELID_ARC_WIDTH_PX / 2.0f;  // semiancho de la cupula
   for (int16_t x = 0; x < EYE_IMAGE_WIDTH; x++) {
-    float nx = (x - half_w) / half_w; // -1.0 .. 1.0
+    float nx = (x - center) / half_w; // -1.0 .. 1.0 dentro de la cupula
+    if (nx < -1.0f) nx = -1.0f;       // fuera de la cupula: arco plano (0)
+    if (nx > 1.0f) nx = 1.0f;
     float clamped = 1.0f - nx * nx;
     if (clamped < 0.0f) clamped = 0.0f;
     float factor = sqrtf(clamped); // 1.0 at center, 0.0 at edges
@@ -347,14 +350,31 @@ void draw_eye_image(int16_t x_pos, int16_t y_pos, uint8_t eyelid_level, EyeImage
 
   // Base eyelid closure amount, as a 0.0 (open) .. 1.0 (fully closed) fraction.
   const float blink_progress = eyelid_level / (float)BLINK_LEVEL_MAX;
-  const float base_cutoff_f = blink_progress * (scaled_height / 2.0f);
-  // The curved-arc effect must fade out completely as the eye approaches full
-  // closure, otherwise the center columns (which have the largest arc offset)
-  // would never fully close - a permanent gap would remain at the middle
-  // even at eyelid_level == BLINK_LEVEL_MAX. Tapering by (1 - blink_progress)
-  // guarantees col_cutoff reaches scaled_height/2 everywhere at full closure.
-  const float arc_taper = 1.0f - blink_progress;
+  // El recorrido del parpado lleva un "extra" igual a la amplitud del arco, de
+  // modo que la columna central (la que mas arco tiene y por tanto la ultima en
+  // cerrarse) llegue justo a scaled_height/2 cuando blink_progress == 1.0.
+  // Antes esto se resolvia atenuando el arco con (1 - blink_progress): la curva
+  // se desvanecia segun avanzaba el cierre, justo cuando el parpado es mas
+  // visible, y el cierre se veia RECTO. Con el "overshoot" la curvatura es
+  // constante durante todo el parpadeo y el ojo sigue cerrandose del todo.
+  const float base_cutoff_f = blink_progress * (scaled_height / 2.0f + EYELID_ARC_AMPLITUDE_PX);
   const bool eye_fully_open = (eyelid_level == 0);
+
+  // "Snap" de cierre: durante BLINK_CLOSING el nivel nunca llega exactamente a
+  // BLINK_LEVEL_MAX (el easing solo vale 1.0 en t == 1.0 y el cast a uint8_t
+  // trunca), asi que el ultimo fotograma antes del cierre dejaba abiertas unas
+  // 4 filas justo en la linea media del globo ocular. Ahi, a izquierda y
+  // derecha del iris, esta la esclerotica: se veia como una linea blanquecina
+  // que destellaba en cada parpadeo (mas visible cuanto mas lento el cierre).
+  // Al forzar el cierre completo en los ultimos EYELID_SNAP_CLOSED_PX pixeles,
+  // esa rendija no llega a dibujarse nunca. El framebuffer ya viene limpio a
+  // negro desde clear_buffer(), asi que salir aqui deja la pantalla cerrada
+  // (y de paso ahorra el bucle de dibujado mientras el ojo esta cerrado).
+  // Se comprueba sobre la columna central (base - amplitud del arco), que es la
+  // ultima en cerrarse; si esa ya esta tapada, el resto tambien lo esta.
+  if (base_cutoff_f - EYELID_ARC_AMPLITUDE_PX >= (scaled_height / 2.0f) - EYELID_SNAP_CLOSED_PX) {
+    return;
+  }
 
   // --- Fixed-point integer optimization ---
   uint32_t src_y_accum = 0;
@@ -397,13 +417,13 @@ void draw_eye_image(int16_t x_pos, int16_t y_pos, uint8_t eyelid_level, EyeImage
         int16_t src_x = src_x_accum >> 16;
 
         if (!eye_fully_open) {
-            // Curved eyelid boundary: the column near the horizontal center
-            // stays open longer (like a real almond-shaped eyelid) than the
-            // columns near the left/right edges - but that curve effect
-            // fades out as the blink approaches full closure, so the eye
-            // still ends up completely closed everywhere.
+            // Borde de parpado curvo: la columna central se mantiene abierta
+            // mas tiempo que las de los extremos (forma de almendra). La
+            // amplitud del arco ya NO se atenua con el avance del parpadeo: el
+            // "overshoot" de base_cutoff_f garantiza el cierre completo, asi
+            // que la curva se mantiene igual de marcada de principio a fin.
             int16_t arc = (src_x >= 0 && src_x < EYE_IMAGE_WIDTH) ? eyelid_arc_offset[src_x] : 0;
-            float col_cutoff_f = base_cutoff_f - (arc * arc_taper);
+            float col_cutoff_f = base_cutoff_f - arc;
             if (col_cutoff_f < 0.0f) col_cutoff_f = 0.0f;
             int16_t col_cutoff = (int16_t)col_cutoff_f;
 

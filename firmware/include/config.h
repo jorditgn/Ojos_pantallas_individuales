@@ -17,7 +17,7 @@
 #define PIN_CS2 TFT_CS_R // Chip-select for screen 2
 
 // --- ToF Sensor (VL53L5CX) Configuration ---
-#define USE_TOF_SENSOR 1 // Set to 1 to enable the ToF sensor, 0 to disable it.
+#define USE_TOF_SENSOR 0 // Set to 1 to enable the ToF sensor, 0 to disable it.
 #define TOF_CALIBRATION_MODE 0 // Set to 1 to simulate sensor data for debugging.
 #define SHOW_TOF_DEBUG_GRID 0 // Set to 1 to display the debug grid, 0 to hide it
 
@@ -69,7 +69,25 @@ const uint8_t BLINK_LEVEL_MAX = 128;               // Fully closed value expecte
 // horizontal center and shrinks first near the corners (like a real almond-
 // shaped eyelid), instead of closing as a flat horizontal line.
 // Bigger value = more pronounced curve.
-const int16_t EYELID_ARC_AMPLITUDE_PX = 30;
+const int16_t EYELID_ARC_AMPLITUDE_PX = 60;
+
+// Anchura sobre la que se reparte la cupula del arco.
+// OJO: la textura del ojo mide EYE_IMAGE_WIDTH (350 px) pero la pantalla solo
+// muestra SCR_WD (240 px) centrados. Si el arco se reparte sobre los 350 px,
+// las columnas visibles caen todas en la zona plana de la cupula y la
+// diferencia entre el centro y los bordes visibles es de apenas un 27% de la
+// amplitud -> el parpado parece RECTO. Repartiendolo sobre el ancho visible,
+// el borde de la pantalla cae justo en el extremo de la cupula y se aprecia
+// la curva completa.
+const int16_t EYELID_ARC_WIDTH_PX = SCR_WD;
+
+// Pixeles de apertura restante a partir de los cuales el parpado se cierra del
+// todo de golpe. Sin esto, las ultimas 1-4 filas que quedan abiertas caen justo
+// sobre la banda central del globo ocular (esclerotica blanca a ambos lados del
+// iris) y destellan como una linea blanquecina en el instante del cierre.
+// El efecto se nota mas cuanto mas lento sea BLINK_CLOSE_DURATION_MS.
+// Subir a 6-8 si todavia se aprecia; bajar a 2 si el cierre parece "saltar".
+const int16_t EYELID_SNAP_CLOSED_PX = 4;
 
 
 

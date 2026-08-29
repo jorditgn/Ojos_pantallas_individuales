@@ -53,11 +53,11 @@ You can also be the hero of the day by supporting my projects, https://buymeacof
 
 1.  **Clone the Repository:**
     ```bash
-    git clone https://github.com/intellar/Dual_Display_ESP32.git
+    git clone https://github.com/jorditgn/Ojos_pantallas_individuales.git
     ```
 
 2.  **Open in VS Code:**
-    *   Open the cloned `Dual_Display_ESP32/firmware` folder in Visual Studio Code.
+    *   Open the cloned `Ojos_pantallas_individuales/firmware` folder in Visual Studio Code.
     *   PlatformIO should automatically recognize the project and prompt you to install the required library dependencies.
 
 3.  **Configure Hardware Pins in `platformio.ini`:**

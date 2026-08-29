@@ -1,5 +1,8 @@
 # ESP32 Animated Eye with ToF Sensor Tracking
 
+Firm para generar ojos en dos pantallas redondas independientes con un esp 32 de dos salidas usb
+
+
 A high-performance, animated eye project for the ESP32-S3 that uses a VL53L5CX Time-of-Flight sensor to track objects and direct the eye's gaze.
 
 Demo video:  https://youtube.com/shorts/loqei5ePCf8
@@ -12,7 +15,7 @@ You can also be the hero of the day by supporting my projects, https://buymeacof
 
 ![Project Demo Image](https://github.com/intellar/Dual_Display_ESP32/blob/bd06864a046d26ce7f1886804b78c7f66b0bc624/demo.png)
 
-## Author & License
+**CREDITOS
 
 *   **Author:** Intellar ([github.com/intellar](https://github.com/intellar))
 *   **License:** This project is released under a custom license. See the LICENSE.md file for details.  Acknowledge and cite intellar in derivative works !

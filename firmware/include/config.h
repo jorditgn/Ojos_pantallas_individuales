@@ -17,9 +17,9 @@
 #define PIN_CS2 TFT_CS_R // Chip-select de la pantalla 2
 
 // --- Configuracion del sensor ToF (VL53L5CX) ---
-#define USE_TOF_SENSOR 0 // Poner a 1 para activar el sensor ToF, 0 para desactivarlo.
+#define USE_TOF_SENSOR 1 // Poner a 1 para activar el sensor ToF, 0 para desactivarlo.
 #define TOF_CALIBRATION_MODE 0 // Poner a 1 para simular datos del sensor durante la depuracion.
-#define SHOW_TOF_DEBUG_GRID 0 // Poner a 1 para mostrar la rejilla de depuracion, 0 para ocultarla
+#define SHOW_TOF_DEBUG_GRID 1 // Poner a 1 para mostrar la rejilla de depuracion, 0 para ocultarla
 
 #define PIN_TOF_SCL 8
 #define PIN_TOF_SDA 18

@@ -55,7 +55,10 @@ static void pick_next_gaze_pose(unsigned long now) {
     float jitter_x = (random(-100, 101) / 100.0f) * GAZE_POSE_JITTER;
     float jitter_y = (random(-100, 101) / 100.0f) * GAZE_POSE_JITTER;
     gaze_target_x = constrain(GAZE_POSES[chosen].x + jitter_x, -1.0f, 1.0f);
-    gaze_target_y = constrain(GAZE_POSES[chosen].y + jitter_y, -1.0f, 1.0f);
+    // El limite inferior es 0.0 y no -1.0: ninguna pose mira ya hacia arriba, y
+    // sin este recorte el jitter de +-0.12 colaria una mirada ligeramente alta
+    // (unos 6 px con MAX_2D_OFFSET_PIXELS = 55) en las poses de y = 0.
+    gaze_target_y = constrain(GAZE_POSES[chosen].y + jitter_y, 0.0f, 1.0f);
 
     unsigned long dwell = random(GAZE_DWELL_MIN_MS, GAZE_DWELL_MAX_MS + 1);
     next_gaze_change_at = now + (unsigned long)(dwell * GAZE_POSES[chosen].dwell_factor);
@@ -118,6 +121,20 @@ void update_eye_positions(const TofTarget& target) {
     for (int i = 0; i < NUM_EYES; i++) {
         eye_positions[i].x += (final_target_x - eye_positions[i].x) * speed;
         eye_positions[i].y += (final_target_y - eye_positions[i].y) * speed;
+
+        // El ojo blanco no mira nunca hacia arriba.
+        // Sin objetivo valido se dibuja la textura normal (ver
+        // get_current_eye_image_type), y las poses de reposo ya estaban
+        // recortadas a y >= 0. Lo que faltaba era este caso: al perder un
+        // objetivo que estaba alto, la textura cambia a blanco en el acto pero
+        // la POSICION sigue viniendo de arriba y tarda casi un segundo en
+        // bajar, asi que durante ese rato se veia el ojo blanco mirando arriba.
+        // El recorte es sobre la posicion, no sobre el objetivo, asi que corta
+        // tambien ese arrastre. A cambio, el descenso vertical es instantaneo
+        // en lugar de suave; es el precio de que no se vea ni un fotograma.
+        if (!target.is_valid && eye_positions[i].y < 0.0f) {
+            eye_positions[i].y = 0.0f;
+        }
     }
 }
 
@@ -128,7 +145,28 @@ EyePosition get_eye_position(int eye_index) {
     return EyePosition{0.0f, 0.0f}; // Return a default/safe value by explicitly constructing it
 }
 
+// --- Modo de funcionamiento ---------------------------------------------
+// Vive aqui porque este es el unico sitio que decide la textura. Arranca
+// siempre en NORMAL: el modo no se guarda, asi que un reinicio lo devuelve al
+// comportamiento de siempre.
+static EyeMode current_eye_mode = EYE_MODE_NORMAL;
+
+void toggle_eye_mode() {
+    current_eye_mode = (current_eye_mode == EYE_MODE_NORMAL) ? EYE_MODE_RED_ONLY
+                                                             : EYE_MODE_NORMAL;
+}
+
+EyeMode get_eye_mode() {
+    return current_eye_mode;
+}
+
 EyeImageType get_current_eye_image_type(const TofTarget& target) {
+    // En SOLO ROJO la textura no depende del sensor: no hay transicion ni al
+    // detectar ni al perder el objetivo. Todo lo demas sigue su curso
+    // (seguimiento, poses de reposo, parpadeo, dilatacion), porque nada de eso
+    // pasa por aqui.
+    if (current_eye_mode == EYE_MODE_RED_ONLY) return RED_ONLY_IMAGE;
+
     return target.is_valid ? EYE_IMAGE_BAD : EYE_IMAGE_NORMAL;
 }
 

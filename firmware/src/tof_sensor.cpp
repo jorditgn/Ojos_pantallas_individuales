@@ -266,8 +266,19 @@ static void process_measurement_data(unsigned long profile_start_time) {
         int pixel_y = best_target_index / 8; // Row
         int pixel_x = best_target_index % 8; // Column
 
-        current_target.x = (static_cast<float>(pixel_y) - 3.5f) / 3.5f;
-        current_target.y = (static_cast<float>(pixel_x) - 3.5f) / 3.5f;
+        // Mapeo verificado con telemetria el 16/10/2026, con el sensor en su
+        // montaje actual y las pantallas giradas 180 grados:
+        //   - La COLUMNA de la rejilla es el eje horizontal del mundo real, asi
+        //     que alimenta la x del ojo. Antes alimentaba la y, y por eso al
+        //     moverse de lado el ojo subia y bajaba.
+        //   - El signo de la x va invertido: con el observador a su derecha el
+        //     sensor da columna 0-1, y el ojo debe mirar a +1.0 para que la
+        //     pupila aparezca del lado donde esta esa persona.
+        //   - La FILA alimenta la y. Su signo esta sin verificar: en las pruebas
+        //     la fila no se movio de 2 porque el objetivo estaba siempre a la
+        //     misma altura.
+        current_target.x = -(static_cast<float>(pixel_x) - 3.5f) / 3.5f;
+        current_target.y =  (static_cast<float>(pixel_y) - 3.5f) / 3.5f;
         current_target.distance_mm = measurementData.distance_mm[best_target_index];
         current_target.min_dist_pixel_x = pixel_x;
         current_target.min_dist_pixel_y = pixel_y;

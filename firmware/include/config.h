@@ -17,9 +17,15 @@
 #define PIN_CS2 TFT_CS_R // Chip-select de la pantalla 2
 
 // --- Configuracion del sensor ToF (VL53L5CX) ---
-#define USE_TOF_SENSOR 0 // Poner a 1 para activar el sensor ToF, 0 para desactivarlo.
+#define USE_TOF_SENSOR 1 // Poner a 1 para activar el sensor ToF, 0 para desactivarlo.
 #define TOF_CALIBRATION_MODE 0 // Poner a 1 para simular datos del sensor durante la depuracion.
 #define SHOW_TOF_DEBUG_GRID 0 // Poner a 1 para mostrar la rejilla de depuracion, 0 para ocultarla
+
+// Telemetria temporal del ToF por el puerto serie: estado del objetivo, zona de
+// la rejilla, distancia y coordenadas que se le pasan al ojo. Sirve sobre todo
+// para comprobar si los ejes estan cruzados. Poner a 0 cuando no haga falta.
+#define TOF_TELEMETRY 1
+#define TOF_TELEMETRY_PERIOD_MS 250 // Cada cuanto se imprime una linea.
 
 #define PIN_TOF_SCL 8
 #define PIN_TOF_SDA 18
@@ -27,6 +33,52 @@
 
 // --- Numero de pantallas (ojos) ---
 #define NUM_EYES 2 // Poner a 1 para un solo ojo, 2 para dos ojos
+
+// =========================================================================
+// MODOS DE FUNCIONAMIENTO Y BOTON
+// =========================================================================
+// Hay dos modos y un boton los alterna:
+//
+//   - NORMAL: la textura cambia segun lo que vea el sensor, el
+//     comportamiento de siempre (en reposo image_giant.bin, siguiendo a
+//     alguien image_giant_bad.bin).
+//   - SOLO ROJO: la textura queda fija en RED_ONLY_IMAGE y no cambia nunca,
+//     ni al detectar ni al perder el objetivo. El MOVIMIENTO no se toca: sin
+//     objetivo sigue mirando por ahi con las poses de reposo y con objetivo
+//     sigue persiguiendolo, igual que en NORMAL.
+//
+// El modo no se guarda en flash: al reiniciar se vuelve a NORMAL.
+//
+// El boton va entre el pin y GND, con el pull-up interno activado, asi que no
+// hace falta resistencia externa. OJO al elegir el pin, porque casi todo esta
+// ocupado: el 13 es el DC de las pantallas y el 14 su RST, el 8 y el 18 son
+// el I2C del sensor, el 9/11/12 el SPI, el 10 y el 21 los chip-select, el 4
+// el ADC de bateria y el 48 la LED. Ademas la PSRAM octal usa el 33-37 y el
+// USB el 19-20.
+#define PIN_MODE_BUTTON 15
+
+// TEMPORAL - REVERTIR PONIENDO A 0.
+#define BUTTON_DEBUG 1
+
+// Textura del modo SOLO ROJO. Es un #define y no una constante con tipo
+// porque config.h se incluye antes de que exista el enum EyeImageType.
+// Cambiar a EYE_IMAGE_NORMAL para fijar la otra textura (image_giant.bin).
+#define RED_ONLY_IMAGE EYE_IMAGE_BAD
+
+const unsigned long MODE_BUTTON_DEBOUNCE_MS = 50;
+
+// Acuse de recibo del cambio de modo: destellos blancos a pantalla completa
+// en las dos pantallas. Con 3 destellos de 70+70 ms el gesto dura ~420 ms,
+// suficiente para verlo sin que parezca una averia.
+const int MODE_FLASH_COUNT = 3;
+const unsigned long MODE_FLASH_ON_MS = 70;  // Pantalla en blanco.
+const unsigned long MODE_FLASH_OFF_MS = 70; // Pantalla en negro entre destellos.
+
+// El color dice a que modo se entra, para no tener que mirar el ojo despues:
+// ROJO al pasar a SOLO ROJO, BLANCO al volver a NORMAL.
+#define MODE_FLASH_COLOR_RED_ONLY TFT_RED
+#define MODE_FLASH_COLOR_NORMAL   TFT_WHITE
+
 
 // --- Configuracion de pantalla e imagen ---
 #define SCR_WD 240 // Ancho de la pantalla en pixeles
@@ -38,6 +90,9 @@
 const uint16_t TRANSPARENT_COLOR_KEY = 0x0000; // Color de los assets tratado como transparente (negro).
 
 // --- Rutas de los archivos de assets ---
+// Las dos texturas tienen nombre corto para hablar de ellas:
+//   ZOMBIE = image_giant.bin     (el de reposo)
+//   ROJOS  = image_giant_bad.bin (el vampiro de venas rojas de ojo_rojo_gpt)
 static const char* EYE_IMAGE_NORMAL_PATH = "/image_giant.bin"; // Imagen para el modo aleatorio/reposo
 static const char* EYE_IMAGE_BAD_PATH = "/image_giant_bad.bin"; // Imagen para el modo de seguimiento
 
@@ -72,7 +127,7 @@ const float LERP_SPEED = 0.2;          // Persecucion de objetivo ToF (lento y s
 // =========================================================================
 // En reposo el ojo ya no elige coordenadas al azar dentro de un cuadrado.
 // Elige entre un repertorio de poses con nombre (izquierda, derecha, al
-// frente, arriba-izquierda...), que es lo que hace que la mirada se lea como
+// frente, abajo-izquierda...), que es lo que hace que la mirada se lea como
 // intencionada en vez de como ruido.
 //
 // Dos detalles deliberados en los valores de la tabla:
@@ -94,17 +149,19 @@ struct GazePose {
     float dwell_factor;  // Multiplicador de la duracion de la fijacion.
 };
 
+// El ojo NO mira nunca hacia arriba: no hay ninguna pose con y negativa. Las
+// tres que habia (ARRIBA, ARRIBA-IZQUIERDA y ARRIBA-DERECHA) sumaban 23 de
+// peso, y ese 23 se ha repartido entre las poses de abajo mas que entre el
+// centro: quitado medio repertorio vertical, cargar el reparto en el CENTRO
+// dejaria la mirada demasiado quieta.
 const GazePose GAZE_POSES[] = {
     //   x       y     peso  dwell   pose
-    {  0.00f,  0.00f,   30,  1.8f }, // AL FRENTE
-    { -1.00f,  0.00f,   14,  1.0f }, // IZQUIERDA
-    {  1.00f,  0.00f,   14,  1.0f }, // DERECHA
-    { -0.70f, -0.60f,    8,  1.0f }, // ARRIBA-IZQUIERDA
-    {  0.70f, -0.60f,    8,  1.0f }, // ARRIBA-DERECHA
-    {  0.00f, -0.70f,    7,  1.0f }, // ARRIBA
-    {  0.00f,  0.55f,    7,  1.0f }, // ABAJO
-    { -0.70f,  0.50f,    6,  1.0f }, // ABAJO-IZQUIERDA
-    {  0.70f,  0.50f,    6,  1.0f }, // ABAJO-DERECHA
+    {  0.00f,  0.00f,   34,  1.8f }, // AL FRENTE
+    { -1.00f,  0.00f,   16,  1.0f }, // IZQUIERDA
+    {  1.00f,  0.00f,   16,  1.0f }, // DERECHA
+    {  0.00f,  0.55f,   12,  1.0f }, // ABAJO
+    { -0.70f,  0.50f,   11,  1.0f }, // ABAJO-IZQUIERDA
+    {  0.70f,  0.50f,   11,  1.0f }, // ABAJO-DERECHA
 };
 const int GAZE_POSE_COUNT = sizeof(GAZE_POSES) / sizeof(GAZE_POSES[0]);
 
@@ -127,7 +184,7 @@ const unsigned long GAZE_DWELL_MAX_MS = 2500; // Fijacion mas larga.
 
 
 // --- Comportamiento del sensor ToF ---
-const int MAX_DIST_TOF = 400; // Distancia maxima en mm para considerar "cercano" un objetivo ToF.
+const int MAX_DIST_TOF = 1000; // Distancia maxima en mm para considerar "cercano" un objetivo ToF.
 
 // --- Comportamiento del parpadeo ---
 // Controla el parpadeo automatico de aspecto natural.
@@ -197,14 +254,14 @@ const int16_t PUPIL_CENTER_Y = EYE_IMAGE_HEIGHT / 2; // 175
 // la pupila horneada queda completamente tapado por ella, asi que mapear la
 // dilatacion desde 0 dejaria sin efecto todos los valores por debajo de ~0.42
 // y pareceria que el efecto directamente no funciona.
-const int16_t PUPIL_BASE_RADIUS_PX = 20;
+const int16_t PUPIL_BASE_RADIUS_PX = 16;
 
 // Radio de la superposicion con pupil_dilation == 1.0. Se mantiene por debajo
 // del radio del iris (~60 px) para que siempre quede algo de color de iris
 // visible, incluso con la pupila dilatada al maximo. Con dilatacion 0.0 la
 // superposicion vale exactamente PUPIL_BASE_RADIUS_PX, es decir, visualmente
 // identica a la textura sin tocar.
-const int16_t PUPIL_MAX_RADIUS_PX = 48;
+const int16_t PUPIL_MAX_RADIUS_PX = 39;
 const int16_t PUPIL_FEATHER_PX = 5; // Anchura del borde suavizado, en pixeles.
 
 // =========================================================================

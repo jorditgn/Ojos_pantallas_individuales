@@ -74,6 +74,9 @@ void setup() {
   Serial.flush(); // Force l'envoi des données
   // Initialise la broche de la LED comme une sortie
   pinMode(LED_PIN, OUTPUT);
+
+  // Boton de modo a GND: el pull-up interno deja el pin en HIGH en reposo.
+  pinMode(PIN_MODE_BUTTON, INPUT_PULLUP);
   
 
   // Initialize LittleFS for asset loading
@@ -113,6 +116,58 @@ void setup() {
   Serial.flush();
 }
 
+/**
+ * @brief Devuelve true una sola vez por pulsacion del boton de modo.
+ * El boton va a GND con el pull-up interno, de modo que en reposo se lee HIGH
+ * y pulsado LOW. Solo se informa del flanco de PULSACION; el de suelta se
+ * ignora, que es lo que evita que una pulsacion cuente como dos cambios.
+ *
+ * Sobre el antirrebote: este sondeo corre una vez por fotograma, y a los
+ * 10-16 FPS que da el firmware eso son 60-100 ms entre lecturas, ya mas que
+ * MODE_BUTTON_DEBOUNCE_MS. Es decir que hoy el filtro casi no trabaja: esta
+ * para que el comportamiento siga siendo correcto si el ritmo sube. La
+ * consecuencia real de sondear tan despacio es la otra: un toque mas corto
+ * que un fotograma se puede perder, hay que pulsar con normalidad.
+ */
+static bool mode_button_pressed(unsigned long now) {
+  static int last_raw = HIGH;
+  static int stable_state = HIGH;
+  static unsigned long last_raw_change = 0;
+
+  int raw = digitalRead(PIN_MODE_BUTTON);
+  if (raw != last_raw) {
+    last_raw = raw;
+    last_raw_change = now;
+  }
+  if (raw != stable_state && (now - last_raw_change) >= MODE_BUTTON_DEBOUNCE_MS) {
+    stable_state = raw;
+    return (stable_state == LOW);
+  }
+  return false;
+}
+
+/**
+ * @brief Tres destellos en las dos pantallas: acuse de recibo visible del
+ * cambio de modo. El color dice a donde se va (rojo = solo ojo rojo, blanco =
+ * vuelta a normal), de modo que no hace falta mirar el ojo para saberlo.
+
+ * Escribe directo al panel con clear_all_screens(), sin pasar por los
+ * framebuffers, asi que no corrompe el fotograma que se esta montando: el
+ * siguiente ciclo del bucle vuelve a dibujar el ojo encima.
+ * Bloquea el bucle unos MODE_FLASH_COUNT * (ON + OFF) ms, y es deliberado. Un
+ * destello repartido entre fotogramas a 10 FPS no se leeria como destello, y
+ * durante esos ~420 ms lo unico que se deja de hacer es leer el sensor.
+ */
+static void flash_mode_change(uint16_t color) {
+  for (int i = 0; i < MODE_FLASH_COUNT; i++) {
+    clear_all_screens(color);
+    delay(MODE_FLASH_ON_MS);
+    clear_all_screens(TFT_BLACK);
+    delay(MODE_FLASH_OFF_MS);
+  }
+}
+
+
 // Forward declaration for the main application logic
 void main_loop();
 
@@ -137,6 +192,38 @@ void main_loop() {
     Serial.flush();
   }
 
+  #if BUTTON_DEBUG
+  {
+    static unsigned long ultimo = 0;
+    static int anterior = -1;
+    int crudo = digitalRead(PIN_MODE_BUTTON);
+    // Imprime cada medio segundo Y ademas en cuanto el pin cambie, para que no
+    // se pierda una pulsacion corta entre dos impresiones periodicas.
+    if (crudo != anterior || current_millis - ultimo >= 500) {
+      if (crudo != anterior) Serial.print("*CAMBIO* ");
+      anterior = crudo;
+      ultimo = current_millis;
+      Serial.print("BOTON pin 15 = ");
+      Serial.println(crudo == HIGH ? "HIGH (reposo)" : "LOW (pulsado)");
+    }
+  }
+  #endif
+
+
+  // --- 0. Boton de modo ---
+  // Antes de leer el sensor, para que el fotograma que viene ya se dibuje con
+  // el modo nuevo.
+  if (mode_button_pressed(current_millis)) {
+    toggle_eye_mode();
+    Serial.printf("MODO: %s\n", get_eye_mode() == EYE_MODE_RED_ONLY
+                                    ? "SOLO ROJO (textura fija)"
+                                    : "NORMAL (la textura sigue al sensor)");
+    Serial.flush();
+    flash_mode_change(get_eye_mode() == EYE_MODE_RED_ONLY ? MODE_FLASH_COLOR_RED_ONLY
+                                                          : MODE_FLASH_COLOR_NORMAL);
+  }
+
+
   // --- 1. Sensor Update ---
   #if USE_TOF_SENSOR
     #if TOF_CALIBRATION_MODE
@@ -147,6 +234,28 @@ void main_loop() {
     #endif
   #endif
   TofTarget target = get_tof_target();
+
+  // --- Telemetria temporal del ToF (ver TOF_TELEMETRY en config.h) ---
+  // Imprime lo que ve el sensor y lo que acaba recibiendo el ojo. La posicion
+  // del ojo va por detras del objetivo por el suavizado: comparar las dos
+  // columnas dice si esta siguiendo de verdad y en que eje.
+  #if USE_TOF_SENSOR && TOF_TELEMETRY
+  {
+    static unsigned long last_telemetry = 0;
+    if (current_millis - last_telemetry >= TOF_TELEMETRY_PERIOD_MS) {
+      last_telemetry = current_millis;
+      EyePosition ep = get_eye_position(EYE_LEFT);
+      if (target.is_valid) {
+        Serial.printf("ToF OBJETIVO zona(col=%d,fil=%d) %4d mm  target x=%+.2f y=%+.2f   ojo x=%+.2f y=%+.2f\n",
+                      target.min_dist_pixel_x, target.min_dist_pixel_y,
+                      target.distance_mm, target.x, target.y, ep.x, ep.y);
+      } else {
+        Serial.printf("ToF --nada--                              (mirada libre)  ojo x=%+.2f y=%+.2f\n",
+                      ep.x, ep.y);
+      }
+    }
+  }
+  #endif
 
   // --- 2. Eye Position Logic ---
   // Update the logical positions of the eyes based on the target

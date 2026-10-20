@@ -34,6 +34,52 @@
 // --- Numero de pantallas (ojos) ---
 #define NUM_EYES 2 // Poner a 1 para un solo ojo, 2 para dos ojos
 
+// =========================================================================
+// MODOS DE FUNCIONAMIENTO Y BOTON
+// =========================================================================
+// Hay dos modos y un boton los alterna:
+//
+//   - NORMAL: la textura cambia segun lo que vea el sensor, el
+//     comportamiento de siempre (en reposo image_giant.bin, siguiendo a
+//     alguien image_giant_bad.bin).
+//   - SOLO ROJO: la textura queda fija en RED_ONLY_IMAGE y no cambia nunca,
+//     ni al detectar ni al perder el objetivo. El MOVIMIENTO no se toca: sin
+//     objetivo sigue mirando por ahi con las poses de reposo y con objetivo
+//     sigue persiguiendolo, igual que en NORMAL.
+//
+// El modo no se guarda en flash: al reiniciar se vuelve a NORMAL.
+//
+// El boton va entre el pin y GND, con el pull-up interno activado, asi que no
+// hace falta resistencia externa. OJO al elegir el pin, porque casi todo esta
+// ocupado: el 13 es el DC de las pantallas y el 14 su RST, el 8 y el 18 son
+// el I2C del sensor, el 9/11/12 el SPI, el 10 y el 21 los chip-select, el 4
+// el ADC de bateria y el 48 la LED. Ademas la PSRAM octal usa el 33-37 y el
+// USB el 19-20.
+#define PIN_MODE_BUTTON 15
+
+// TEMPORAL - REVERTIR PONIENDO A 0.
+#define BUTTON_DEBUG 1
+
+// Textura del modo SOLO ROJO. Es un #define y no una constante con tipo
+// porque config.h se incluye antes de que exista el enum EyeImageType.
+// Cambiar a EYE_IMAGE_NORMAL para fijar la otra textura (image_giant.bin).
+#define RED_ONLY_IMAGE EYE_IMAGE_BAD
+
+const unsigned long MODE_BUTTON_DEBOUNCE_MS = 50;
+
+// Acuse de recibo del cambio de modo: destellos blancos a pantalla completa
+// en las dos pantallas. Con 3 destellos de 70+70 ms el gesto dura ~420 ms,
+// suficiente para verlo sin que parezca una averia.
+const int MODE_FLASH_COUNT = 3;
+const unsigned long MODE_FLASH_ON_MS = 70;  // Pantalla en blanco.
+const unsigned long MODE_FLASH_OFF_MS = 70; // Pantalla en negro entre destellos.
+
+// El color dice a que modo se entra, para no tener que mirar el ojo despues:
+// ROJO al pasar a SOLO ROJO, BLANCO al volver a NORMAL.
+#define MODE_FLASH_COLOR_RED_ONLY TFT_RED
+#define MODE_FLASH_COLOR_NORMAL   TFT_WHITE
+
+
 // --- Configuracion de pantalla e imagen ---
 #define SCR_WD 240 // Ancho de la pantalla en pixeles
 #define SCR_HT 240 // Alto de la pantalla en pixeles
@@ -44,6 +90,9 @@
 const uint16_t TRANSPARENT_COLOR_KEY = 0x0000; // Color de los assets tratado como transparente (negro).
 
 // --- Rutas de los archivos de assets ---
+// Las dos texturas tienen nombre corto para hablar de ellas:
+//   ZOMBIE = image_giant.bin     (el de reposo)
+//   ROJOS  = image_giant_bad.bin (el vampiro de venas rojas de ojo_rojo_gpt)
 static const char* EYE_IMAGE_NORMAL_PATH = "/image_giant.bin"; // Imagen para el modo aleatorio/reposo
 static const char* EYE_IMAGE_BAD_PATH = "/image_giant_bad.bin"; // Imagen para el modo de seguimiento
 
@@ -205,14 +254,14 @@ const int16_t PUPIL_CENTER_Y = EYE_IMAGE_HEIGHT / 2; // 175
 // la pupila horneada queda completamente tapado por ella, asi que mapear la
 // dilatacion desde 0 dejaria sin efecto todos los valores por debajo de ~0.42
 // y pareceria que el efecto directamente no funciona.
-const int16_t PUPIL_BASE_RADIUS_PX = 20;
+const int16_t PUPIL_BASE_RADIUS_PX = 16;
 
 // Radio de la superposicion con pupil_dilation == 1.0. Se mantiene por debajo
 // del radio del iris (~60 px) para que siempre quede algo de color de iris
 // visible, incluso con la pupila dilatada al maximo. Con dilatacion 0.0 la
 // superposicion vale exactamente PUPIL_BASE_RADIUS_PX, es decir, visualmente
 // identica a la textura sin tocar.
-const int16_t PUPIL_MAX_RADIUS_PX = 48;
+const int16_t PUPIL_MAX_RADIUS_PX = 39;
 const int16_t PUPIL_FEATHER_PX = 5; // Anchura del borde suavizado, en pixeles.
 
 // =========================================================================

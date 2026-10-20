@@ -30,6 +30,18 @@ void update_eye_positions(const TofTarget& target);
 // Gets the current calculated position of a specific eye
 EyePosition get_eye_position(int eye_index);
 
+// --- Modos de funcionamiento (ver la seccion MODOS en config.h) ---
+enum EyeMode {
+    EYE_MODE_NORMAL = 0, // La textura cambia segun el sensor.
+    EYE_MODE_RED_ONLY    // Textura fija en RED_ONLY_IMAGE.
+};
+
+// Alterna entre los dos modos. Lo llama el sondeo del boton.
+void toggle_eye_mode();
+
+// Modo activo ahora mismo.
+EyeMode get_eye_mode();
+
 // Determines which eye image to use based on the target's validity
 EyeImageType get_current_eye_image_type(const TofTarget& target);
 

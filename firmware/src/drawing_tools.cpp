@@ -318,7 +318,13 @@ void init_tft() {
   Serial.print("call tft.init ");
   tft.init();
   Serial.print("call setRotation ");
-  tft.setRotation(0); // Set rotation to 0 degrees to correct inverted display
+  // Rotacion 2 = giro de 180 grados (MADCTL con MX|MY): las pantallas van
+  // montadas boca abajo. Lo resuelve el panel por hardware, y para 240x240 el
+  // ancho, el alto y los offsets son identicos a los de la rotacion 0, asi que
+  // no cambia nada del codigo de dibujo ni cuesta tiempo de CPU.
+  // Los dos chip-select estan en bajo aqui, de modo que el comando llega a las
+  // dos pantallas a la vez.
+  tft.setRotation(2);
   
   digitalWrite(screens[EYE_LEFT].CS, HIGH);
   digitalWrite(screens[EYE_RIGHT].CS, HIGH);

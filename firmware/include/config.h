@@ -19,7 +19,13 @@
 // --- Configuracion del sensor ToF (VL53L5CX) ---
 #define USE_TOF_SENSOR 1 // Poner a 1 para activar el sensor ToF, 0 para desactivarlo.
 #define TOF_CALIBRATION_MODE 0 // Poner a 1 para simular datos del sensor durante la depuracion.
-#define SHOW_TOF_DEBUG_GRID 1 // Poner a 1 para mostrar la rejilla de depuracion, 0 para ocultarla
+#define SHOW_TOF_DEBUG_GRID 0 // Poner a 1 para mostrar la rejilla de depuracion, 0 para ocultarla
+
+// Telemetria temporal del ToF por el puerto serie: estado del objetivo, zona de
+// la rejilla, distancia y coordenadas que se le pasan al ojo. Sirve sobre todo
+// para comprobar si los ejes estan cruzados. Poner a 0 cuando no haga falta.
+#define TOF_TELEMETRY 1
+#define TOF_TELEMETRY_PERIOD_MS 250 // Cada cuanto se imprime una linea.
 
 #define PIN_TOF_SCL 8
 #define PIN_TOF_SDA 18
@@ -72,7 +78,7 @@ const float LERP_SPEED = 0.2;          // Persecucion de objetivo ToF (lento y s
 // =========================================================================
 // En reposo el ojo ya no elige coordenadas al azar dentro de un cuadrado.
 // Elige entre un repertorio de poses con nombre (izquierda, derecha, al
-// frente, arriba-izquierda...), que es lo que hace que la mirada se lea como
+// frente, abajo-izquierda...), que es lo que hace que la mirada se lea como
 // intencionada en vez de como ruido.
 //
 // Dos detalles deliberados en los valores de la tabla:
@@ -94,17 +100,19 @@ struct GazePose {
     float dwell_factor;  // Multiplicador de la duracion de la fijacion.
 };
 
+// El ojo NO mira nunca hacia arriba: no hay ninguna pose con y negativa. Las
+// tres que habia (ARRIBA, ARRIBA-IZQUIERDA y ARRIBA-DERECHA) sumaban 23 de
+// peso, y ese 23 se ha repartido entre las poses de abajo mas que entre el
+// centro: quitado medio repertorio vertical, cargar el reparto en el CENTRO
+// dejaria la mirada demasiado quieta.
 const GazePose GAZE_POSES[] = {
     //   x       y     peso  dwell   pose
-    {  0.00f,  0.00f,   30,  1.8f }, // AL FRENTE
-    { -1.00f,  0.00f,   14,  1.0f }, // IZQUIERDA
-    {  1.00f,  0.00f,   14,  1.0f }, // DERECHA
-    { -0.70f, -0.60f,    8,  1.0f }, // ARRIBA-IZQUIERDA
-    {  0.70f, -0.60f,    8,  1.0f }, // ARRIBA-DERECHA
-    {  0.00f, -0.70f,    7,  1.0f }, // ARRIBA
-    {  0.00f,  0.55f,    7,  1.0f }, // ABAJO
-    { -0.70f,  0.50f,    6,  1.0f }, // ABAJO-IZQUIERDA
-    {  0.70f,  0.50f,    6,  1.0f }, // ABAJO-DERECHA
+    {  0.00f,  0.00f,   34,  1.8f }, // AL FRENTE
+    { -1.00f,  0.00f,   16,  1.0f }, // IZQUIERDA
+    {  1.00f,  0.00f,   16,  1.0f }, // DERECHA
+    {  0.00f,  0.55f,   12,  1.0f }, // ABAJO
+    { -0.70f,  0.50f,   11,  1.0f }, // ABAJO-IZQUIERDA
+    {  0.70f,  0.50f,   11,  1.0f }, // ABAJO-DERECHA
 };
 const int GAZE_POSE_COUNT = sizeof(GAZE_POSES) / sizeof(GAZE_POSES[0]);
 
@@ -127,7 +135,7 @@ const unsigned long GAZE_DWELL_MAX_MS = 2500; // Fijacion mas larga.
 
 
 // --- Comportamiento del sensor ToF ---
-const int MAX_DIST_TOF = 400; // Distancia maxima en mm para considerar "cercano" un objetivo ToF.
+const int MAX_DIST_TOF = 1000; // Distancia maxima en mm para considerar "cercano" un objetivo ToF.
 
 // --- Comportamiento del parpadeo ---
 // Controla el parpadeo automatico de aspecto natural.

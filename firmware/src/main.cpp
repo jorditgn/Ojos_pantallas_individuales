@@ -148,6 +148,28 @@ void main_loop() {
   #endif
   TofTarget target = get_tof_target();
 
+  // --- Telemetria temporal del ToF (ver TOF_TELEMETRY en config.h) ---
+  // Imprime lo que ve el sensor y lo que acaba recibiendo el ojo. La posicion
+  // del ojo va por detras del objetivo por el suavizado: comparar las dos
+  // columnas dice si esta siguiendo de verdad y en que eje.
+  #if USE_TOF_SENSOR && TOF_TELEMETRY
+  {
+    static unsigned long last_telemetry = 0;
+    if (current_millis - last_telemetry >= TOF_TELEMETRY_PERIOD_MS) {
+      last_telemetry = current_millis;
+      EyePosition ep = get_eye_position(EYE_LEFT);
+      if (target.is_valid) {
+        Serial.printf("ToF OBJETIVO zona(col=%d,fil=%d) %4d mm  target x=%+.2f y=%+.2f   ojo x=%+.2f y=%+.2f\n",
+                      target.min_dist_pixel_x, target.min_dist_pixel_y,
+                      target.distance_mm, target.x, target.y, ep.x, ep.y);
+      } else {
+        Serial.printf("ToF --nada--                              (mirada libre)  ojo x=%+.2f y=%+.2f\n",
+                      ep.x, ep.y);
+      }
+    }
+  }
+  #endif
+
   // --- 2. Eye Position Logic ---
   // Update the logical positions of the eyes based on the target
   update_eye_positions(target);

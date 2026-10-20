@@ -55,7 +55,10 @@ static void pick_next_gaze_pose(unsigned long now) {
     float jitter_x = (random(-100, 101) / 100.0f) * GAZE_POSE_JITTER;
     float jitter_y = (random(-100, 101) / 100.0f) * GAZE_POSE_JITTER;
     gaze_target_x = constrain(GAZE_POSES[chosen].x + jitter_x, -1.0f, 1.0f);
-    gaze_target_y = constrain(GAZE_POSES[chosen].y + jitter_y, -1.0f, 1.0f);
+    // El limite inferior es 0.0 y no -1.0: ninguna pose mira ya hacia arriba, y
+    // sin este recorte el jitter de +-0.12 colaria una mirada ligeramente alta
+    // (unos 6 px con MAX_2D_OFFSET_PIXELS = 55) en las poses de y = 0.
+    gaze_target_y = constrain(GAZE_POSES[chosen].y + jitter_y, 0.0f, 1.0f);
 
     unsigned long dwell = random(GAZE_DWELL_MIN_MS, GAZE_DWELL_MAX_MS + 1);
     next_gaze_change_at = now + (unsigned long)(dwell * GAZE_POSES[chosen].dwell_factor);
